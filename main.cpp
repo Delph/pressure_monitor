@@ -12,13 +12,18 @@ Adafruit_BMP280 bmpOuter(BMP_OUTER_CS);
 
 LiquidCrystal lcd(PIN_RS, PIN_ENABLE, PIN_D4, PIN_D5, PIN_D6, PIN_D7);
 
-Debounce sw(PIN_SWITCH);
+Debounce sw_display(PIN_SW_DISPLAY);
+Debounce sw_silence(PIN_SW_SILENCE);
 
 bool displayTemperature = false;
 
+uint32_t alarm = 0;
+bool armed = true;
+
 void setup()
 {
-  sw.init();
+  sw_display.init();
+  sw_silence.init();
 
   lcd.begin(16, 2);
   lcd.display();
@@ -27,6 +32,9 @@ void setup()
   digitalWrite(PIN_LED_RED, 0);
   pinMode(PIN_LED_GREEN, OUTPUT);
   digitalWrite(PIN_LED_GREEN, 0);
+
+  pinMode(PIN_BUZZER, OUTPUT);
+  digitalWrite(PIN_BUZZER, 0);
 
   if (!bmpInner.begin())
   {
@@ -77,15 +85,27 @@ float average(const float* const items, const size_t len)
 uint32_t nextUpdate = 0;
 void loop()
 {
-  sw.update();
+  sw_display.update();
+  sw_silence.update();
 
-  if (sw.is_released())
+  if (sw_display.is_released())
   {
     displayTemperature = !displayTemperature;
 
     // force an update
     nextUpdate = millis();
   }
+
+  if (sw_silence.is_released())
+  {
+    alarm = 0;
+    armed = false;
+    digitalWrite(PIN_BUZZER, 0);
+  }
+
+
+  if (alarm)
+    digitalWrite(PIN_BUZZER, ((millis() - alarm) / 500) % 2);
 
   const float innerPressure = bmpInner.readPressure() / 100.0f;
   const float innerTemperature = bmpInner.readTemperature();
@@ -111,6 +131,16 @@ void loop()
     // red LED on when the chamber pressure is equal or higher
     digitalWrite(PIN_LED_RED, innerPressureAverage >= outerPressureAverage);
     digitalWrite(PIN_LED_GREEN, !(innerPressureAverage >= outerPressureAverage));
+    if (armed)
+    {
+      if (alarm == 0 && innerPressureAverage >= outerPressureAverage)
+        alarm = millis();
+    }
+    else
+    {
+      if (innerPressureAverage < outerPressureAverage)
+        armed = true;
+    }
 
     lcd.clear();
     lcd.setCursor(0, 0);
